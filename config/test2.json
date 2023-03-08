@@ -1,0 +1,6 @@
+{
+    "forest_stand": "data/SyntheticForestStand/stand_small.txt",
+    "delimiter": " ",
+    "helios_template": "data/templates/helios_config_template.json",
+    "helios_config_out": "data/helios_config.json"
+}
