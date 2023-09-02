@@ -1,5 +1,10 @@
 import numpy as np
 from scipy import stats
+import torch
+import torch.nn as nn
+import torch.nn.init as init
+import torch.nn.functional as F
+
 #ths,ths_,cnt = Get_Ths(pts_corr_val, target['semseg'].cpu().numpy()[0], target['ptsgroup'].cpu().numpy()[0], ths, ths_, cnt)
 def Get_Ths(pts_corr, seg, ins, ths, ths_, cnt):
     seg = np.transpose(seg,(1,0))
@@ -225,3 +230,131 @@ def BlockMerging(volume, volume_seg, pts, grouplabel, groupseg, gap=1e-3):
             finalgrouplabel[i] = groupcate[grouplabel[i]]
     return finalgrouplabel
     
+def convert_groupandcate_to_one_hot(grouplabels):
+    # grouplabels: BxN
+    NUM_GROUPS = 50
+    group_one_hot = torch.zeros((grouplabels.shape[0], grouplabels.shape[1], NUM_GROUPS)).cuda()
+    pts_group_mask = torch.zeros((grouplabels.shape[0], grouplabels.shape[1])).cuda()
+
+    un, cnt = torch.unique(grouplabels, return_counts=True)
+    group_count_dictionary = {}
+    for v,u in enumerate(un):
+        group_count_dictionary[int(u.item())] = cnt[v].item()
+    totalnum = 0
+    for k_un, v_cnt in group_count_dictionary.items():
+        if k_un != -1:
+            totalnum += v_cnt
+
+    for idx in range(grouplabels.shape[0]):
+        for jdx in range(grouplabels.shape[1]):
+            if grouplabels[idx, jdx] != -1:
+                group_one_hot[idx, jdx, int(grouplabels[idx, jdx])] = 1
+                pts_group_mask[idx, jdx] = float(totalnum) / float(group_count_dictionary[int(grouplabels[idx, jdx])]) # 1. - float(group_count_dictionary[grouplabels[idx, jdx]]) / totalnum
+
+    return group_one_hot.float(), grouplabels
+
+# class SGPNLoss(nn.Module):
+#     def __init__(self):
+#         super(SGPNLoss, self).__init__()
+
+#     def forward(self, l0_points, Fsim, target, alpha = 2.0, margin = 0.8):
+#         r = torch.sum(Fsim*Fsim,dim=1)
+#         r = r.view((l0_points.shape[0],-1,1)).permute(0,2,1)
+#         trans = torch.transpose(Fsim ,2, 1)
+#         mul = 2 * torch.matmul(trans, Fsim)
+#         sub = r - mul
+#         D = sub + torch.transpose(r, 2, 1)
+#         D[D<=0.0] = 0.0
+
+#         ## similarity
+#         pts_group_label, group_mask = convert_groupandcate_to_one_hot(target)
+#         # alpha=2.0
+
+#         ## Similarity loss
+#         B = pts_group_label.shape[0]
+#         N = pts_group_label.shape[1]
+
+#         group_mat_label = torch.matmul(pts_group_label,torch.transpose(pts_group_label,1,2))
+#         diag_idx = torch.arange(0,group_mat_label.shape[1], out=torch.LongTensor())
+#         group_mat_label[:,diag_idx,diag_idx] = 1.0
+
+#         samegroup_mat_label = group_mat_label
+#         diffgroup_mat_label = 1.0 - group_mat_label
+
+#         num_samegroup = torch.sum(samegroup_mat_label)
+
+#         pos = samegroup_mat_label * D
+
+#         ## TODO : Replace with original format as below:
+#         ## sub = margin - D
+#         ## sub[sub<=0.0] = 0.0
+
+#         ## VERY GOOD: sub = 1/(D+1)
+#         sub = 1/(D+1) * 1/(D+1)
+
+#         neg_samesem = alpha * (diffgroup_mat_label * sub)
+        
+#         simmat_loss = neg_samesem + pos
+
+#         # TODO: Add these lines back
+#         ## group_mask_weight = torch.matmul(group_mask.unsqueeze(2), torch.transpose(group_mask.unsqueeze(2), 2, 1))
+#         ## simmat_loss = simmat_loss * group_mask_weight
+#         # Instead of
+#         simmat_loss = 100 * simmat_loss
+        
+#         simmat_loss = torch.mean(simmat_loss)
+
+#         return simmat_loss
+
+class SGPNLoss(nn.Module):
+    def __init__(self):
+        super(SGPNLoss, self).__init__()
+
+    def forward(self, l0_points, Fsim, target, alpha = 2.0, margin = 0.8):
+        r = torch.sum(Fsim*Fsim,dim=1)
+        r = r.view((l0_points.shape[0],-1,1)).permute(0,2,1)
+        trans = torch.transpose(Fsim ,2, 1)
+        mul = 2 * torch.matmul(trans, Fsim)
+        sub = r - mul
+        D = sub + torch.transpose(r, 2, 1)
+        D[D<=0.0] = 0.0
+
+        ## similarity
+        pts_group_label, group_mask = convert_groupandcate_to_one_hot(target)
+        # alpha=2.0
+
+        ## Similarity loss
+        B = pts_group_label.shape[0]
+        N = pts_group_label.shape[1]
+
+        group_mat_label = torch.matmul(pts_group_label,torch.transpose(pts_group_label,1,2))
+        diag_idx = torch.arange(0,group_mat_label.shape[1], out=torch.LongTensor())
+        group_mat_label[:,diag_idx,diag_idx] = 1.0
+
+        samegroup_mat_label = group_mat_label
+        diffgroup_mat_label = 1.0 - group_mat_label
+
+        num_samegroup = torch.sum(samegroup_mat_label)
+
+        pos = samegroup_mat_label * D
+
+        ## TODO : Replace with original format as below:
+        sub = margin - D
+        sub[sub<=0.0] = 0.0
+
+        ## VERY GOOD: sub = 1/(D+1)
+        ## sub = 1/(D+1) * 1/(D+1)
+
+        neg_samesem = alpha * (diffgroup_mat_label * sub)
+        
+        simmat_loss = neg_samesem + pos
+
+        # TODO: Add these lines back
+        group_mask_weight = torch.matmul(group_mask.unsqueeze(2), torch.transpose(group_mask.unsqueeze(2), 2, 1))
+        simmat_loss = simmat_loss * group_mask_weight
+        # Instead of
+        ## simmat_loss = 100 * simmat_loss
+        
+        simmat_loss = torch.mean(simmat_loss)
+
+        return simmat_loss

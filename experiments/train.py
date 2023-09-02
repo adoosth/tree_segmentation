@@ -120,26 +120,20 @@ if __name__ == '__main__':
                     # add noise
                     #input_tensor = input_tensor + torch.randn(input_tensor.shape).cuda() * 0.00002
                     target = target[:, idx]
-                #optimizer.zero_grad()
+                optimizer.zero_grad()
                 loss = model(input_tensor, target, training=True, epoch=p)
-                #print(loss)
-                #print("loss: ", loss.item())
                 lost.append(loss.item())
                 loss.backward()
                 optimizer.step()
-                if (p % 20 == 0 and p != 0):
-                    for param_group in optimizer.param_groups:
-                        param_group['lr'] = param_group['lr'] / 2
-                if (p % 5 ==0 and p !=0 ):
-                    torch.save(model.cpu(), "./" + architecture + "/models/" + model_basename + "_" + str(p) + ".ckpt")
-                    model.cuda()
             else:
                 print("Warning: not enough points. Skipping...")
 
         print("Epoch ", p, " loss: ", np.array(lost).mean())
         writer.add_scalar('Loss simmat_loss ', np.array(lost).mean(), p)
-        #if p % 50 == 0 and p != 0:
-            # lower learning rate
-            #for param_group in optimizer.param_groups:
-                #param_group['lr'] = param_group['lr'] / 2
+        if (p % 20 == 0 and p != 0):
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = param_group['lr'] / 2
+        if (p % 5 ==0 and p !=0 ):
+            torch.save(model.cpu(), "./" + architecture + "/models/" + model_basename + "_" + str(p) + ".ckpt")
+            model.cuda()
     torch.save(model.cpu(), "./" + architecture + "/models/" + model_basename + ".ckpt")

@@ -7,6 +7,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import laspy
 import numpy as np
+from torch.utils.data.distributed import DistributedSampler
 
 # define Dataset
 class ForestDataset(torch.utils.data.Dataset):
@@ -25,7 +26,7 @@ class ForestDataset(torch.utils.data.Dataset):
         if forests == 'all':
             self.forests = [os.path.basename(f)[:-4] for f in os.listdir(data_dir) if f.endswith('.laz') or f.endswith('.las')]
         print("Loading {} forests from {}".format(len(self.forests), data_dir))
-        print(self.forests)
+        #print(self.forests)
         if self.preload:
             self.data = []
             for forest_id in self.forests:
@@ -139,7 +140,11 @@ class ForestDataset(torch.utils.data.Dataset):
     
 
 # define DataLoader
-def get_dataloader(data_dir, forests, batch_size, num_workers, max_trees = 10, point_count=4096, sampling='random', select_trees = None, annotated = None, bbox = None, preload=True):
+def get_dataloader(data_dir, forests, batch_size, num_workers, max_trees = 10, point_count=4096, sampling='random', select_trees = None, annotated = None, bbox = None, preload=True, distributed=False, world_rank = 0, world_size = 1):
     dataset = ForestDataset(data_dir, forests, max_trees=max_trees, point_count=point_count, sampling=sampling, select_trees = select_trees, annotated = annotated, bbox = bbox, preload=preload)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    if distributed:
+        data_sampler = DistributedSampler(dataset, num_replicas=world_size, rank=world_rank)
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, sampler=data_sampler)
+    else:
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     return dataloader

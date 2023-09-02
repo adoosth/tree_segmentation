@@ -165,6 +165,9 @@ archive/
 # Data
 data/
 
+# Log
+log/
+
 # Models
 *.ckpt
 
