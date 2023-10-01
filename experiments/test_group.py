@@ -20,6 +20,7 @@ model_basename = None
 model_path = None
 architecture = None
 
+from architectures.SGPN_conf import SGPN
 
 def visualize2d(points, labels, save_path=None):
     fig = plt.figure()
@@ -96,10 +97,9 @@ def get_features(model, data):
         idx = np.random.choice(xyz.shape[1], 4096, replace=False)
         xyz = xyz[:, idx, :]
         target = target[:, idx]
-    output = model(xyz, test=True)
-    print(output)
-    print(output.shape)
-    return xyz.detach().cpu().numpy(), target.detach().cpu().numpy(), output.detach().cpu().numpy()
+    #output = model(xyz, test=True)
+    output = model.segment(xyz)
+    return xyz.detach().cpu().numpy(), target.detach().cpu().numpy(), output#.reshape(-1)
 
 def cluster(features, target = None, n_clusters=10, save_path=None):
     # First apply PCA to reduce dimensionality
@@ -136,6 +136,7 @@ def best_mapping(labels, targets):
     # find the best match between labels and targets
     # return the accuracy
     mapping = {}
+    targets = targets.reshape(-1)
     for l in np.unique(labels):
         # mapping[l] = np.argmax(np.bincount(targets[labels == l]))
         # fix cannot cast array from dtype('float32') to dtype('int64') according to the rule 'safe'
@@ -177,31 +178,50 @@ if __name__ == '__main__':
     else:
         print("Usage: python test.py <model_basename> <data_dir> [<subfolder>]")
         exit(0)
+    # spawn cuda
+    torch.multiprocessing.set_start_method('spawn')
     model = torch.load(model_path)
+    model_new = SGPN(num_classes=10, latent_dims=10, alpha_step = 400, margin=0.8).cuda()
+    model_new.load_state_dict(model.state_dict())
+    model = model_new
     save_path = os.path.join('./', architecture, 'results', model_basename, dataset + '-' + subfolder)
     model.cuda().eval()
+    
     #dataloader = get_dataloader('../data/real', 'all', 1, 1, max_trees = 50, point_count = 4096, sampling='random')
-    dataloader = get_dataloader(data_dir, 'all', 1, 1, max_trees = 50, point_count = 4096, sampling='random', annotated = None, preload=False, bbox = bbox, aug_rot = False)
+    dataloader = get_dataloader(data_dir, 'all', 1, 1, max_trees = 50, point_count = 4096, sampling='farthest', annotated = None, preload=False, bbox = bbox, aug_rot = False)
     data = next(iter(dataloader))
-    xyz, target, features = get_features(model, data)
-    xyz, target, features = xyz[0], target[0], features[0]
-    n_true_clusters = len(np.unique(target))
-    if n_true_clusters == 1:
-        n_true_clusters = 10
+    xyz, target, labels = get_features(model, data)
+    xyz, target = xyz[0], target[0]
+    #n_true_clusters = len(np.unique(target))
+    #if n_true_clusters == 1:
+    #    n_true_clusters = 10
     #labels = cluster(features, target, n_clusters=50)
-    labels = cluster(features, n_clusters=n_true_clusters, save_path=save_path)
+    #labels = cluster(features, n_clusters=n_true_clusters, save_path=save_path)
+    #labels = model.segment(data)
+    print("SGPN found {} clusters".format(len(np.unique(labels))))
+    print("Ground truth has {} clusters".format(len(np.unique(target))))
 
-    print(labels)
-    print(labels.shape)
-    print(np.unique(labels))
     mapping = best_mapping(labels, target)
 
-
     # visualize
-    visualize(xyz, labels, save_path=os.path.join(save_path,'pred.png'), latents = features)
+    visualize(xyz, labels, save_path=os.path.join(save_path,'pred.png'))#, latents = features)
     visualize(xyz, target, save_path=os.path.join(save_path,'truth.png'))
     visualize_mappping(xyz, labels, target, mapping, save_path=os.path.join(save_path,'mapping.png'))
     accuracy, mAP, mIoU = evaluate(labels, target, mapping)
     with open(os.path.join(save_path, 'metrics.txt'), 'w') as f:
         f.write("Accuracy: {}\nmAP: {}\nmIoU: {}".format(accuracy, mAP, mIoU))
+
+    # save results as las
+    labels = labels.reshape(-1)
+    xyz = xyz.reshape(-1, 3)
+    labels = labels.astype(np.uint8)
+    xyz = xyz.astype(np.float32)
+    las = laspy.create(point_format=2)
+    las.x = xyz[:, 0]
+    las.y = xyz[:, 1]
+    las.z = xyz[:, 2]
+    # add extra data as hitObjectId
+    las.user_data = labels
+    las.write(os.path.join(save_path, dataset + '_' + 'SGPN' + '.laz'))
+
     

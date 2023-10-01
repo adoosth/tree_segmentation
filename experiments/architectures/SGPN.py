@@ -49,3 +49,7 @@ class SGPN(nn.Module):
             return l0_points.permute(0, 2, 1)
         Fsim = self.conv2_1(l0_points.unsqueeze(2)).squeeze(2)
         return l0_points, Fsim
+
+    def segment(self, xyz):
+        l0_points, Fsim = self.forward(xyz, test = True)
+        

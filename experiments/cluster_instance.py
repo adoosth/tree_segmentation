@@ -36,9 +36,11 @@ if __name__ == '__main__':
     print("Received sys.argv ")
     print(sys.argv)
     forests = 'all'
-    batch_size = 10
+    batch_size = 4
     num_workers = 4
-    alpha_step = 5
+    alpha_step = 20
+    epochs = 100
+    alpha = 2.0
     if len(sys.argv) > 3:
         architecture = sys.argv[1]
         data_dir = os.path.join("../data/", sys.argv[2])
@@ -94,8 +96,6 @@ if __name__ == '__main__':
     
     dataloader = get_dataloader(data_dir + "/train", forests, batch_size, num_workers, max_trees = 50, point_count = 4096, sampling='random', preload=False, distributed = True, world_size = world_size, world_rank = world_rank)
     optimizer = optim.Adam([{'params': model.parameters(), 'lr': 0.00005}])
-    epochs = 1000
-    alpha = 2.0
     loss_fn = SGPNLoss()
     if (world_rank == 0):
         writer = SummaryWriter('./' + architecture + '/runs/' + model_basename)

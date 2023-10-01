@@ -162,6 +162,9 @@ cython_debug/
 # Archive
 archive/
 
+# Container
+container/*.sif
+
 # Data
 data/
 
@@ -171,7 +174,27 @@ log/
 # Models
 *.ckpt
 
+.cache
+
+cls_watershed/R/*
+cls_watershed/results/*
+cls_dalponte/R/*
+cls_dalponte/results/*
+cls_ams3d/R/*
+cls_ams3d/results/*
+
 # Tensorboard
 *runs/
 *results/
 *presentation/
+
+SGPN/models/
+SGPN/log/
+SGPN/config/
+
+_old/
+visualization/seg_compare/
+visualization/data/
+visualization/results/
+
+*.bash_history

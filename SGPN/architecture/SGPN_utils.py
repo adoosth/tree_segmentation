@@ -128,14 +128,10 @@ def GroupMerging(pts_corr, confidence,label_bin):
     seg = np.ones(pts_corr.shape[0])
     pts_corr = pts_corr.detach().cpu().numpy()
     confidence = confidence.detach().cpu().numpy()
-    # print confidences
-    print("Confidences", confidence)
     #seg[seg>0.5] = 1
     #seg[seg<0.5] = 0
+    #confvalidpts = (confidence>0.4)
     confvalidpts = (confidence>0.4)
-    #confvalidpts = (confidence>-1e9)
-    print("Percentage of valid points",np.sum(confvalidpts)/float(confvalidpts.shape[0]))
-    print("Average confidence",np.mean(confidence[confvalidpts]))
     un_seg = np.unique(seg)
     refineseg = np.zeros(pts_corr.shape[0])
     groupid = -1* np.ones(pts_corr.shape[0])
@@ -159,22 +155,18 @@ def GroupMerging(pts_corr, confidence,label_bin):
                         iou = float(np.sum(validpt & proposals[gp])) / np.sum(validpt|proposals[gp])#uniou
                         validpt_in_gp = float(np.sum(validpt & proposals[gp])) / np.sum(validpt)#uniou
                         if iou > 0.8 or validpt_in_gp > 0.8: # if the intersection over union is higher than 0.85 then we merge the two groups
-                            #print("iou is " + str(iou) + " and validpt_in_gp is " + str(validpt_in_gp) + " and np.sum(validpt) is " + str(np.sum(validpt)) + " and np.sum(proposals[gp]) is " + str(np.sum(proposals[gp])) + " and np.sum(validpt & proposals[gp]) is " + str(np.sum(validpt & proposals[gp])) + " and np.sum(validpt|proposals[gp]) is " + str(np.sum(validpt|proposals[gp])) + " and np.sum(validpt & proposals[gp]) / np.sum(validpt|proposals[gp]) is " + str(float(np.sum(validpt & proposals[gp])) / np.sum(validpt|proposals[gp])))
                             flag = True
                             if np.sum(validpt)>np.sum(proposals[gp]):
                                 proposals[gp] = validpt
                             continue
+
                     if not flag:
                         proposals += [validpt]
 
-            print("Remaining proposals",len(proposals))
             if len(proposals) == 0:
                 proposals += [pts_in_seg]
         for gp in range(len(proposals)):
-            # if the number of points in the group is higher than 10 then we create a new group
-            #if np.sum(proposals[gp])>10:
-            #print("Group",np.sum(proposals[gp]))
-            if np.sum(proposals[gp])>5:
+            if np.sum(proposals[gp])>10:
                 groupid[proposals[gp]] = numgroups
                 groupseg[numgroups] = i_seg
                 numgroups += 1
@@ -183,7 +175,7 @@ def GroupMerging(pts_corr, confidence,label_bin):
     print("Numgroups",numgroups)
     un, cnt = np.unique(groupid, return_counts=True)
     for ig, g in enumerate(un):
-        if cnt[ig] < 30:
+        if cnt[ig] < 10:
         #if cnt[ig] < 45:
             groupid[groupid==g] = -1
 
@@ -262,9 +254,7 @@ def convert_groupandcate_to_one_hot(grouplabels):
         for jdx in range(grouplabels.shape[1]):
             if grouplabels[idx, jdx] != -1:
                 group_one_hot[idx, jdx, int(grouplabels[idx, jdx])] = 1
-                pts_group_mask[idx, jdx] = float(totalnum) / float(group_count_dictionary[int(grouplabels[idx, jdx])]) # Original
-                #pts_group_mask[idx,jdx] = 1. - float(group_count_dictionary[grouplabels[idx, jdx]]) / totalnum # Original2
-                #pts_group_mask[idx,jdx] = float(group_count_dictionary[int(grouplabels[idx, jdx])]) / float(totalnum) # Custom
+                pts_group_mask[idx, jdx] = float(totalnum) / float(group_count_dictionary[int(grouplabels[idx, jdx])]) # 1. - float(group_count_dictionary[grouplabels[idx, jdx]]) / totalnum
 
     return group_one_hot.float(), grouplabels
 
@@ -320,56 +310,3 @@ def convert_groupandcate_to_one_hot(grouplabels):
 #         simmat_loss = torch.mean(simmat_loss)
 
 #         return simmat_loss
-
-class SGPNLoss(nn.Module):
-    def __init__(self):
-        super(SGPNLoss, self).__init__()
-
-    def forward(self, l0_points, Fsim, target, alpha = 2.0, margin = 0.8):
-        r = torch.sum(Fsim*Fsim,dim=1)
-        r = r.view((l0_points.shape[0],-1,1)).permute(0,2,1)
-        trans = torch.transpose(Fsim ,2, 1)
-        mul = 2 * torch.matmul(trans, Fsim)
-        sub = r - mul
-        D = sub + torch.transpose(r, 2, 1)
-        D[D<=0.0] = 0.0
-
-        ## similarity
-        pts_group_label, group_mask = convert_groupandcate_to_one_hot(target)
-        # alpha=2.0
-
-        ## Similarity loss
-        B = pts_group_label.shape[0]
-        N = pts_group_label.shape[1]
-
-        group_mat_label = torch.matmul(pts_group_label,torch.transpose(pts_group_label,1,2))
-        diag_idx = torch.arange(0,group_mat_label.shape[1], out=torch.LongTensor())
-        group_mat_label[:,diag_idx,diag_idx] = 1.0
-
-        samegroup_mat_label = group_mat_label
-        diffgroup_mat_label = 1.0 - group_mat_label
-
-        num_samegroup = torch.sum(samegroup_mat_label)
-
-        pos = samegroup_mat_label * D
-
-        ## TODO : Replace with original format as below:
-        sub = margin - D
-        sub[sub<=0.0] = 0.0
-
-        ## VERY GOOD: sub = 1/(D+1)
-        ## sub = 1/(D+1) * 1/(D+1)
-
-        neg_samesem = alpha * (diffgroup_mat_label * sub)
-        
-        simmat_loss = neg_samesem + pos
-
-        # TODO: Add these lines back
-        group_mask_weight = torch.matmul(group_mask.unsqueeze(2), torch.transpose(group_mask.unsqueeze(2), 2, 1))
-        simmat_loss = simmat_loss * group_mask_weight
-        # Instead of
-        ## simmat_loss = 100 * simmat_loss
-        
-        simmat_loss = torch.mean(simmat_loss)
-
-        return simmat_loss
