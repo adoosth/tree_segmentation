@@ -7,9 +7,9 @@
 echo "Activating conda..."
 CONDA_BASE=$(conda info --base)
 source $CONDA_BASE/etc/profile.d/conda.sh
-conda activate PointMAE
+conda activate SGPN
 
 CONFIG_FILE=$1
 echo "CONFIG_FILE="$CONFIG_FILE
 
-python local_train.py $CONFIG_FILE
+python train.py $CONFIG_FILE
